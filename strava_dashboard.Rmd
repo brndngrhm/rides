@@ -1,0 +1,883 @@
+---
+title: "Strava Data"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    #source_code: embed
+    #theme: bootstrap
+    #theme: cerulean
+    #theme: journal
+    theme: flatly #good one
+    #theme: readable
+    #theme: spacelab
+    #theme: united
+    #theme: cosmo #default
+    #theme: lumen
+    #theme: darkly
+    #theme: paper #good one
+    #theme: sandstone
+    #theme: simplex
+    #theme: yeti #good one
+runtime: shiny
+---
+
+```{r packages, include=FALSE}
+#setup instructions ----
+
+#create personal API - https://www.strava.com/settings/api
+#1 create an application - http://labs.strava.com/developers/ >> then got o get started
+   #* create a new blank .rmd file, save and publish it, use this as the url for creating the app
+   #* for "Authorization callback domain" type 'localhost'
+    #* create app to get the client ID and client secret
+
+#2. Lives at https://www.strava.com/settings/api
+
+#get google API Key - https://developers.google.com/maps/documentation/elevation/#api_key
+#1. https://console.developers.google.com/flows/enableapi?apiid=elevation_backend&reusekey=true&pli=1
+#2. https://console.developers.google.com/apis/credentials/wizard?api=elevation_backend&project=fluted-box-150117
+
+#create stoken
+# - Every API retrieval function in the rStrava package requires an authentication token (called stoken in the help documents).
+
+#load packages ---- 
+#devtools::install_github('fawda123/rStrava')
+library(rStrava) #https://github.com/fawda123/rStrava
+library(ggplot2)
+library(dplyr)
+library(plyr)
+library(lubridate)
+library(flexdashboard)
+library(httr)
+library(zoo)
+library(highcharter)
+library(xts)
+library(scales)
+library(ggthemes)
+#library(plotly)
+library(ggmap)
+library(miniUI)
+#library(DT)
+library(shiny)
+#library(Hmisc)
+library(httr)
+#library(skimr)
+# library(padr)
+# library(ggrepel)
+library(viridis)
+```
+
+```{r load_secrets}
+
+source("secrets.R")
+
+```
+
+
+```{r get_data, include=F}
+
+# my_acts <- get_activity_list(stoken)
+# acts <- lapply(my_acts, function(x) x$location_city) %in% c('Philadelphia', 'Camden', 'Wilmington')
+# get_heat_map(my_acts, acts = which(acts), col = 'darkgreen', size = 2, dist = F)
+
+# #get summary data
+# athlind_fun(364947)
+# 
+# #get athlete data
+# athl_fun(364947, trace = TRUE)
+# compile_activity(rides.df[1])
+# test <- get_activity(1320168111, stoken)
+# sapply(test, "[[", 1) #access the first child of every element in your list 
+# #get length of metric
+# length(test$splits_metric)
+# 
+# #get avg speed - sample
+# str(test$splits_standard[1])
+# str(test$splits_standard[[1]])
+# str(test$splits_standard[1])
+# length(test$splits_standard)
+# 
+# speed <- numeric(length(test$splits_standard))
+# 
+# for(i in  1:length((test$splits_standard))){
+#   
+#   speed[i] <- test$splits_standard[[i]][[7]]
+#   
+# }
+# 
+# speed <- as.data.frame(speed)
+# speed$cs <- cumsum(speed$speed)
+#        
+# test$splits_standard[[1]][[1]]
+# test$splits_standard[[1]][[2]]
+# test$splits_standard[[1]][[3]]
+# test$splits_standard[[1]][[4]]
+# test$splits_standard[[1]][[5]]
+# test$splits_standard[[1]][[6]]
+# test$splits_standard[[1]][[7]]
+# test$splits_standard[[1]][[8]]
+
+#Get Data ----
+rides <- get_activity_list(stoken, id = id, club = FALSE, friends = FALSE)
+rides.df <- compile_activities(rides,  units = "imperial")
+rides.df <- as.data.frame(rides.df)
+# 
+# #write
+# write.csv(rides.df, file = "/Users/brendangraham/R Working Directory/Other/rides/App/rides.df.csv")
+
+#read
+#rides.df <- read.csv(file = "/Users/brendangraham/R Working Directory/Other/rides/App/rides.df.csv")
+
+```
+
+```{r format_data, include=F}
+#Add some date columns----
+rides.df$date <- lubridate::ymd_hms(rides.df$start_date_local)
+rides.df$year <- lubridate::year(rides.df$date)
+rides.df$month <- lubridate::month(rides.df$date, label = T, abbr = F)
+rides.df$month2 <- lubridate::month(rides.df$date, label = T)
+rides.df$week <- lubridate::week(rides.df$date)
+rides.df$day <- lubridate::wday(rides.df$date, label = T)
+rides.df$hour <- lubridate::hour(rides.df$date)
+rides.df$year_mon <- zoo::as.yearmon(rides.df$date)
+rides.df$date2 <- as.Date(rides.df$date)
+
+options(lubridate.week.start = 1) #set week start to monday insread of sunday
+#options(tz="America/New York") #set timezone
+#Sys.setenv(TZ = "EST")
+
+rides.df$week_of <- format(floor_date(rides.df$date2, unit="week"), format = "%b %d, %Y")
+rides.df$week_of_2 <- floor_date(rides.df$date2, unit="week")
+rides.df$date.fake <- paste(rides.df$month2, "-", "01", "-", rides.df$year, by="")
+rides.df$date.fake <- mdy(rides.df$date.fake)
+rides.df$date.fake <- as.Date(rides.df$date.fake)
+
+
+#add some duration and indicator columns----
+rides.df$duration_mins <- rides.df$elapsed_time/60
+#rides.df$duration_hhmm <- as.period(rides.df$duration_mins)
+rides.df$moving_time_mins <- rides.df$moving_time / 60
+rides.df$ride_ind <- "Non-Training"
+rides.df$ride_ind[rides.df$commute == FALSE] <- "Training"
+rides.df$ride_ind[rides.df$type == "VirtualRide"] <- "Training"
+rides.df$ride_ind <- ordered(rides.df$ride_ind, levels = c("Training", "Non-Training"))
+rides.df$bike <- "Emonda"
+rides.df$bike[rides.df$type == "VirtualRide"] <- "Emonda"
+rides.df$bike[rides.df$gear_id == "b2193146"] <- "Cross Pro"
+rides.df$bike[rides.df$gear_id == "b2980189"] <- "Commuter"
+rides.df$bike[rides.df$ride_ind == "Commute"] <- "Commuter"
+rides.df$bike[is.na(rides.df$gear_id)] <- "NA"
+
+rides.df$type2 <- "Commute"
+rides.df$type2[rides.df$bike %in% c("Emonda", "Cross Pro")] <- "Road Ride"
+rides.df$type2[rides.df$type == "VirtualRide"] <- "Zwift"
+
+
+
+#remove runs and select columns----
+rides <- rides.df %>% 
+  dplyr::filter(type != "Run") %>%
+  dplyr::select(id, date, date2, date.fake, year, month, month2, year_mon, week, week_of, week_of_2, day, hour, type, type2,
+                ride_ind, bike, name,
+                device_watts, has_heartrate, duration_mins, moving_time_mins, distance, average_speed, max_speed, total_elevation_gain, elev_high, average_watts, kilojoules,
+                pr_count, achievement_count, athlete_count, kudos_count, map.summary_polyline)
+
+max.week <- rides$week_of[rides$date == max(rides$date)]
+```
+
+```{r summaries, include=F}
+
+#create weekly/monthly summaries ----
+
+#calculate weekly # miles, hours, elevation 
+week <- rides %>% 
+  dplyr::group_by(year, date.fake, week, week_of, week_of_2,type2) %>% 
+  dplyr::summarise(tot_dist = sum(distance),
+                   tot_time = sum(moving_time_mins)/60,
+                   tot_elev = sum(total_elevation_gain))
+
+#calculate # miles, hours, elevation in current week
+current.week <- rides %>% 
+  dplyr::filter(year_mon == max(year_mon)) %>%
+  dplyr::filter(week_of_2 == max(week_of_2)) %>%
+  dplyr::group_by(week_of, week_of_2) %>% 
+  dplyr::summarise(tot_dist = sum(distance),
+                   tot_time = sum(moving_time_mins)/60,
+                   tot_elev = sum(total_elevation_gain),
+                   tot_cals = sum(kilojoules, na.rm = T))
+
+#calculate monthly # miles, hours, elevation 
+month <- rides %>% 
+  dplyr::group_by(year, month, date.fake, year_mon) %>% 
+  dplyr::summarise(tot_dist = sum(distance),
+                   tot_time = sum(moving_time_mins)/60,
+                   tot_elev = sum(total_elevation_gain))
+
+month_bike <- rides %>% 
+  dplyr::group_by(year, month, date.fake, year_mon, bike, type2) %>% 
+  dplyr::summarise(tot_dist = sum(distance),
+                   tot_time = sum(moving_time_mins)/60,
+                   tot_elev = sum(total_elevation_gain))
+                   
+#calculate # miles, hours, elevation in current month
+current.month <- rides %>% 
+  dplyr::filter(year_mon == max(year_mon)) %>%
+  dplyr::group_by(date.fake, year_mon) %>%
+  dplyr::summarise(tot_dist = sum(distance),
+                   tot_time = sum(moving_time_mins)/60,
+                   tot_elev = sum(total_elevation_gain))
+```
+
+Dashboard
+======================================================================
+
+Sidebar {.sidebar}
+----------------------------
+
+```{r sidebar}
+
+#Define sidebar user inputs
+
+selectInput(
+        inputId = "ride_select",
+        label = h4("Ride Type"),
+        choices = rides$ride_ind,
+        selected = c("Training", "Non-Training"),
+        multiple = T)
+
+selectInput(
+        inputId = "week_select",
+        label = h4("Week Of"),
+        choices = rides$week_of,
+        selected = "TEST",
+        multiple = F)
+
+selectInput(
+        inputId = "chart_select",
+        label = h4("Chart Type"),
+        choices = c("All Rides", "Cumulative", "Distribution"),
+        selected = "Trend",
+        multiple = F)
+
+selectInput(
+        inputId = "bike_select",
+        label = h4("Ride Type"),
+        choices = c("Road Ride", "Zwift", "Commute"),
+        selected = "Road Ride",
+        multiple = F)
+
+# textInput(
+#         inputId = "cals",
+#         label = h4("Enter Daily Calories"),
+#         value = 0)
+
+# selectInput(
+#         inputId="bike_select",
+#         label=h4("Select Bike"),
+#         choices=rides$bike,
+#         selected="Emonda",
+#         multiple = T)
+
+
+# radioButtons(
+#         inputId="distance_filter",
+#         label=h4("Show Distance Filter?"),
+#         choices=list(
+#           "No",
+#           "Yes"),
+#         selected="No")
+# 
+#     conditionalPanel(
+#         condition = "input.distance_filter == 'Yes'",
+#             sliderInput(inputId = "distance_select", 
+#               label = h4("Select Distance"),
+#               min = 0, 
+#               max = as.numeric(format(max(rides$distance), digits = 2)), 
+#               value = 25,
+#               step = 5))
+```
+
+
+Row
+--------------------------  
+### **[Total Miles]**  
+```{r}
+renderValueBox({
+  
+    df <- rides %>% 
+      dplyr::filter(week_of == input$week_select & ride_ind %in% input$ride_select) %>%
+      dplyr::group_by(week_of, week_of_2) %>% 
+      dplyr::summarise(tot_dist = sum(distance),
+                     tot_time = sum(moving_time_mins)/60,
+                     tot_elev = sum(total_elevation_gain),
+                     tot_cals = sum(kilojoules, na.rm = T))
+
+valueBox(paste(format(df$tot_dist,digits=4), "Miles", sep = " "))
+
+})
+```
+
+### **[Total Hours]**  
+```{r}
+renderValueBox({
+  
+    df <- rides %>% 
+    dplyr::filter(week_of == input$week_select & ride_ind %in% input$ride_select) %>%
+    dplyr::group_by(week_of, week_of_2) %>% 
+    dplyr::summarise(tot_dist = sum(distance),
+                   tot_time = sum(moving_time_mins)/60,
+                   tot_elev = sum(total_elevation_gain),
+                   tot_cals = sum(kilojoules, na.rm = T))
+
+    valueBox(paste(format(df$tot_time,digits=2), "Hours", sep = " "))
+})
+
+```
+
+### **[Total Elevation]**  
+```{r}
+renderValueBox({
+  
+    df <- rides %>% 
+    dplyr::filter(week_of == input$week_select & ride_ind %in% input$ride_select) %>%
+    dplyr::group_by(week_of, week_of_2) %>% 
+    dplyr::summarise(tot_dist = sum(distance),
+                   tot_time = sum(moving_time_mins)/60,
+                   tot_elev = sum(total_elevation_gain),
+                   tot_cals = sum(kilojoules, na.rm = T))
+
+    valueBox(paste(format(df$tot_elev,digits=4, big.mark = ","), "Feet", sep = " "))
+})
+
+```
+
+### **[Total Cals Burned]**  
+```{r}
+renderValueBox({
+  
+    df <- rides %>% 
+    dplyr::filter(week_of == input$week_select & ride_ind %in% input$ride_select) %>%
+    dplyr::group_by(week_of, week_of_2) %>% 
+    dplyr::summarise(tot_dist = sum(distance),
+                   tot_time = sum(moving_time_mins)/60,
+                   tot_elev = sum(total_elevation_gain),
+                   tot_cals = sum(kilojoules, na.rm = T))
+  
+    valueBox(paste(format(df$tot_cals,digits=4, big.mark = ","), "Cals", sep = " "))
+})
+
+```
+
+```{r, eval = F, include = F}
+### **`r paste("[Net Cal Intake Week of", current.week$week_of,"]", sep=" ") `**  
+# renderValueBox({
+#   
+#     df <- rides %>% 
+#     dplyr::filter(week_of == input$week_select & ride_ind %in% input$ride_select) %>%
+#     dplyr::group_by(week_of, week_of_2) %>% 
+#     dplyr::summarise(tot_dist = sum(distance),
+#                    tot_time = sum(moving_time_mins)/60,
+#                    tot_elev = sum(total_elevation_gain),
+#                    tot_cals = sum(kilojoules, na.rm = T))
+#     
+#     #cals <- sum(as.numeric(as.character(c(input$cals))))
+#     cals <- sum(as.numeric(unlist(strsplit(input$cals, ", "))))
+#     
+#     cal_goal <- 13300
+#     
+#     #adds cals burned to weekly cal goal, then subtracts cals eaten
+#     valueBox(paste(format(((df$tot_cals + cal_goal)-cals),digits=4, big.mark = ","), "Cals Left", sep = " "))
+# })
+
+```
+
+
+Row
+--------------------------  
+
+### Distance x Bike
+```{r, echo=F}
+
+#weeks <- rides$week_of[rides$year_mon > max(rides$year_mon) - (3/12)]
+
+bike_summary <- reactive({
+  
+   rides %>% 
+    dplyr::filter(week_of == input$week_select) %>%
+    #dplyr::filter(week_of == "Dec 18, 2017") %>%
+    dplyr::group_by(week_of, week_of_2, type2) %>% 
+    dplyr::summarise(tot_dist = sum(distance))
+})
+
+
+#plotting parameters
+hc_params <- highchart() %>%
+  hc_chart(zoomType = "x") %>%
+  hc_tooltip(crosshairs = TRUE, shared = TRUE, borderWidth = 1, shared=T) %>%
+  #hc_yAxis(title=" ") %>%
+  #hc_exporting(enabled = TRUE) %>%
+  # hc_credits(enabled = TRUE,
+  #            text = "NFL Data from nflscrapR",
+  #            href = "https://github.com/maksimhorowitz/nflscrapR") %>% 
+  #hc_add_theme(hc_theme_gridlight()) %>%
+  #hc_add_theme(hc_theme_elementary()) %>%
+  hc_add_theme(hc_theme_flatdark()) %>%
+  hc_legend(enabled = FALSE)
+  #hc_subtitle(text="2015 Season (Click & Drag to Zoom)", align="left") %>%
+  #hc_yAxis(title=" ")
+  # hc_exporting(enabled = TRUE,
+  #              filename = "plot_data")
+
+plot.type <- "bar"   #type of plot
+alignment <- "left"  #subtitle alignment
+
+
+renderHighchart(
+  
+hc_params %>%
+  hc_xAxis(categories = bike_summary()$type2) %>%
+  hc_add_series(name="Miles", data = round(bike_summary()$tot_dist,2), type = "bar", colorByPoint=T) %>%
+  hc_subtitle(text=paste("Commute: ",round(bike_summary()$tot_dist[bike_summary()$type2 == "Commute"],0), " | ", 
+                         "Road: ",round(bike_summary()$tot_dist[bike_summary()$type2 == "Road Ride"],0), " | ",
+                         "Zwift: ",round(bike_summary()$tot_dist[bike_summary()$type2 == "Zwift"],0), sep=""),
+              align="left") %>%
+   hc_yAxis(title=" ")
+)
+
+```
+
+### Daily Rides
+```{r, echo=F}
+
+day_summary <- reactive({
+  
+   rides %>% 
+    dplyr::filter(week_of == input$week_select) %>%
+    dplyr::group_by(date2, type2) %>% 
+    dplyr::summarise(tot_dist = sum(distance))
+})
+  
+renderHighchart(
+  
+hchart(day_summary(), type =  "scatter", hcaes(x=date2, y = round(tot_dist,2), group = type2, size = tot_dist)) %>%
+  hc_add_theme(hc_theme_flatdark()) %>%
+  hc_yAxis(title=" ") %>%
+  hc_xAxis(title=" ") %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_tooltip(useHTML = TRUE,
+             headerFormat = "<table>",
+             pointFormat = paste("<tr><th colspan=\"1\"><b>{point.label}</b></th></tr>",
+                                 "<tr><th>Miles: </th><td>{point.y}</td></tr>"),
+             footerFormat = "</table>")
+
+)
+
+```
+
+Row
+----------------
+### Monthly Comparison
+```{r heatmap, echo = F}
+
+#colors <- viridis::viridis(200, begin = .4, end = 1, option = "D")
+colors <- viridis::plasma(200, begin = 1, end = .3)
+
+month_summary <- reactive({
+
+   rides %>%
+    #dplyr::filter(type2 == input$bike_select) %>%
+    dplyr::filter(ride_ind %in% input$ride_select) %>%
+    #dplyr::filter(type2 == "Road Ride") %>%
+    #dplyr::filter(ride_ind %in% c('Training', "Non-Training")) %>%
+    #dplyr::group_by(year, month, date.fake, year_mon, bike, type2) %>%
+    dplyr::group_by(year, month, date.fake, year_mon) %>%
+    dplyr::summarise(tot_dist = sum(distance))
+
+})
+
+renderHighchart(
+  
+ hchart(month_summary(), type = "heatmap", hcaes(x = month, y = factor(year, levels = c("2019", "2018", "2017", "2016", "2015")), value = round(tot_dist,2))) %>%
+  hc_legend(layout = "vertical", verticalAlign = "top", align = "right") %>%
+  hc_add_theme(hc_theme_flatdark()) %>%
+  hc_yAxis(title=" ") %>%
+  hc_xAxis(title=" ") %>%
+  hc_colorAxis(minColor = colors[1], maxColor = colors[200]) %>%
+  hc_chart(zoomType = "xy")
+ 
+)
+ 
+```
+
+### Historical Weekly Distance
+```{r timeseries, echo=F}
+
+road.week <- week %>% 
+  dplyr::filter(type2 == "Road Ride") %>% 
+  dplyr::group_by(week_of_2) %>% 
+  dplyr::summarise(tot_dist= sum(tot_dist))
+
+commute.week <- week %>% 
+  dplyr::filter(type2 == "Commute") %>% 
+  dplyr::group_by(week_of_2) %>% 
+  dplyr::summarise(tot_dist= sum(tot_dist))
+
+zwift.week <- week %>% 
+  dplyr::filter(type2 == "Zwift") %>% 
+  dplyr::group_by(week_of_2) %>% 
+  dplyr::summarise(tot_dist= sum(tot_dist))
+
+ road.ts <- xts(round(road.week$tot_dist,2), frequency = 52, order.by = road.week$week_of_2)
+commute.ts <- xts(round(commute.week$tot_dist,2), frequency = 52, order.by = commute.week$week_of_2)
+zwift.ts <- xts(round(zwift.week$tot_dist,2), frequency = 52, order.by = zwift.week$week_of_2)
+
+highchart(type = "stock") %>% 
+  hc_add_series(commute.ts, id = "Commute", name = "Commute") %>% 
+  hc_add_series(road.ts, id = "Road", name = "Road")%>% 
+  hc_add_series(zwift.ts, id = "Zwift", name = "Zwift") %>%
+  #hc_add_theme(hc_theme_elementary()) %>%
+  hc_add_theme(hc_theme_flatdark()) %>%
+  hc_legend(enabled = T)  %>%
+  hc_rangeSelector(inputEnabled = FALSE) %>%
+  hc_navigator(enabled = F) %>%
+  hc_scrollbar(enabled = F)%>%
+  hc_chart(zoomType = "xy")
+
+```
+
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+
+```{r, echo=F, eval=F}
+#CHUNK NOT RUN
+### Monthly Distance
+month_bike <- reactive({
+  
+  rides %>% 
+    dplyr::filter(type2 == input$bike_select) %>%
+    dplyr::group_by(year, month, date.fake, year_mon, type2) %>%
+    dplyr::summarise(tot_dist = sum(distance),
+                     tot_time = sum(moving_time_mins)/60,
+                     tot_elev = sum(total_elevation_gain))
+  
+})
+  
+
+
+renderHighchart(
+  
+ hchart(month_bike(), type =  "line", hcaes(x=date.fake, y = round(tot_dist, 2), group = year)) %>%
+  #hc_add_theme(hc_theme_elementary())%>%
+  hc_add_theme(hc_theme_flatdark()) %>%
+  hc_yAxis(title=" ") %>%
+  hc_xAxis(title=" ") %>%
+  hc_chart(zoomType = "xy") %>%
+  # hc_subtitle(text=paste("Cross Pro: ",format(sum(dist()$total_dist[dist()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+  #                        "Commute: ",format(sum(dist()$total_dist[dist()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+  #                        "Road: ",format(sum(dist()$total_dist[dist()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+  #                        "Zwift: ",format(sum(dist()$total_dist[dist()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              # align="left") %>%
+  hc_tooltip(useHTML = TRUE,
+             headerFormat = "<table>",
+             pointFormat = paste("<tr><th colspan=\"1\"><b>{point.label}</b></th></tr>",
+                                 "<tr><th>Miles: </th><td>{point.y}</td></tr>"),
+             footerFormat = "</table>")
+  
+
+)
+
+
+```
+
+### Distance
+```{r distance, echo=F}
+
+dist <- reactive({
+  
+  if(input$chart_select == "All Rides"){
+    
+    rides %>%
+      #dplyr::filter(bike != "Cross Pro") %>%
+      dplyr::select(bike, type2, date2, month, distance) %>%
+      dplyr::group_by(bike,type2,date2)  %>%
+      dplyr::summarise(total_dist = sum(distance)) %>%
+      dplyr::mutate(month = lubridate::month(date2, label = T, abbr = T),
+                    ride_type = paste(bike, type2, sep = "-"))
+  }
+    
+    else if(input$chart_select == "Distribution"){
+      
+    rides %>%
+      dplyr::filter(type2 %in% input$bike_select) %>%
+      #dplyr::filter(type2 == "Road Ride") %>%
+      #dplyr::filter(bike != "Cross Pro") %>%
+      dplyr::select(bike, distance) 
+    }
+  
+  else {
+    
+    rides %>%
+      #dplyr::filter(bike != "Cross Pro")%>%
+      dplyr::group_by(bike, type2, date2) %>%
+      dplyr::summarise(total = sum(distance)) %>%
+      #dplyr::group_by(bike, type2, date2) %>%
+      dplyr::mutate(cs = cumsum(total), 
+             ride_type = paste(bike, type2, sep = "-"))
+    
+  }
+  
+  
+})
+  
+
+renderHighchart(
+  
+  if(input$chart_select == "All Rides"){
+    
+  hchart(dist(), type =  "scatter", hcaes(x=date2, y = round(total_dist,2), group = ride_type, size = total_dist)) %>%
+  #hc_add_theme(hc_theme_elementary())%>%
+  hc_add_theme(hc_theme_flatdark()) %>%
+  hc_yAxis(title=" ") %>%
+  hc_xAxis(title=" ") %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_subtitle(text=paste("Cross Pro: ",format(sum(dist()$total_dist[dist()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+                         "Commute: ",format(sum(dist()$total_dist[dist()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+                         "Road: ",format(sum(dist()$total_dist[dist()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+                         "Zwift: ",format(sum(dist()$total_dist[dist()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              align="left") %>%
+  hc_tooltip(useHTML = TRUE,
+             headerFormat = "<table>",
+             pointFormat = paste("<tr><th colspan=\"1\"><b>{point.label}</b></th></tr>",
+                                 "<tr><th>Miles: </th><td>{point.y}</td></tr>"),
+             footerFormat = "</table>")%>% 
+    hc_yAxis(min = 0)
+    
+  }
+ 
+  else if(input$chart_select == "Distribution"){
+    
+    hchart(dist()$distance) %>% 
+      hc_add_theme(hc_theme_flatdark()) %>%
+      hc_yAxis(title=" ") %>%
+      hc_xAxis(title=" ") %>%
+      hc_chart(zoomType = "xy") %>%
+      hc_subtitle(text=paste("Avg. Cross Pro: ",format(mean(dist()$distance[dist()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+                         "Avg. Commute: ",format(mean(dist()$distance[dist()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+                         "Avg. Road: ",format(mean(dist()$distance[dist()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+                         "Avg. Zwift: ",format(mean(dist()$distance[dist()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              align="left")
+    
+  }
+  
+  else{
+    
+    hchart(dist(), type =  "line", hcaes(x=date2, y = round(cs,2), group = ride_type)) %>% 
+      hc_add_theme(hc_theme_flatdark()) %>%
+      hc_yAxis(title=" ") %>%
+      hc_xAxis(title=" ") %>%
+      hc_chart(zoomType = "xy") %>%
+      hc_subtitle(text=paste("Cross Pro: ",format(max(dist()$cs[dist()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+                         "Commute: ",format(max(dist()$cs[dist()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+                         "Road: ",format(max(dist()$cs[dist()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+                         "Zwift: ",format(max(dist()$cs[dist()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              align="left") 
+  }
+)
+
+```
+
+
+### Speed
+```{r speed, echo=F}
+
+speed <- reactive({
+  
+  if(input$chart_select == "All Rides"){
+    
+    rides %>%
+      #dplyr::filter(bike != "Cross Pro") %>%
+      dplyr::select(bike, type2, date2, month, average_speed) %>%
+      #dplyr::group_by(bike,type2,date2)  %>%
+      #dplyr::summarise(avg_speed = mean(average_speed)) %>%
+      dplyr::mutate(avg_speed = average_speed,
+                    month = lubridate::month(date2, label = T, abbr = T),
+                    ride_type = paste(bike, type2, sep = "-"))
+  }
+    
+    else if(input$chart_select == "Distribution"){
+      
+    rides %>%
+      dplyr::filter(type2 %in% input$bike_select) %>%
+      #dplyr::filter(type2 == "Road Ride") %>%
+      #dplyr::filter(bike != "Cross Pro") %>%
+      dplyr::select(bike, average_speed) 
+    }
+  
+  else {
+    
+    rides %>%
+      dplyr::filter(type2 %in% input$bike_select) %>%
+      #dplyr::filter(type2 == "Road Ride") %>%
+      #dplyr::filter(bike != "Cross Pro") %>%
+      dplyr::select(bike, average_speed) 
+    
+  }
+  
+  
+})
+  
+
+renderHighchart(
+  
+  if(input$chart_select == "All Rides"){
+    
+  hchart(speed(), type =  "scatter", hcaes(x=date2, y = round(avg_speed,2), group = ride_type, size = avg_speed)) %>%
+  #hc_add_theme(hc_theme_elementary())%>%
+  hc_add_theme(hc_theme_flatdark()) %>%
+  hc_yAxis(title=" ") %>%
+  hc_xAxis(title=" ") %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_subtitle(text=paste("Cross Pro: ",format(mean(speed()$avg_speed[speed()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+                         "Commute: ",format(mean(speed()$avg_speed[speed()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+                         "Road: ",format(mean(speed()$avg_speed[speed()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+                         "Zwift: ",format(mean(speed()$avg_speed[speed()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              align="left") %>%
+  hc_tooltip(useHTML = TRUE,
+             headerFormat = "<table>",
+             pointFormat = paste("<tr><th colspan=\"1\"><b>{point.label}</b></th></tr>",
+                                 "<tr><th>Avg. Speed: </th><td>{point.y}</td></tr>"),
+             footerFormat = "</table>")%>% 
+    hc_yAxis(min = 0)
+    
+  }
+ 
+  else if(input$chart_select == "Distribution"){
+    
+    hchart(speed()$average_speed) %>% 
+      hc_add_theme(hc_theme_flatdark()) %>%
+      hc_yAxis(title=" ") %>%
+      hc_xAxis(title=" ") %>%
+      hc_chart(zoomType = "xy") %>%
+      hc_subtitle(text=paste("Avg. Cross Pro: ",format(mean(speed()$average_speed, na.rm = T)[speed()$ride_type == "Cross Pro-Road Ride"],digits = 0, big.mark = ","), " | ", 
+                         "Avg. Commute: ",format(mean(speed()$average_speed,na.rm = T)[speed()$ride_type == "Commuter-Commute"],digits = 0, big.mark = ","), " | ", 
+                         "Avg. Road: ",format(mean(speed()$average_speed, na.rm = T)[speed()$ride_type == "Emonda-Road Ride"],digits = 0, big.mark = ","), " | ",
+                         "Avg. Zwift: ",format(mean(speed()$average_speed, na.rm = T)[speed()$ride_type == "Emonda-Zwift"],digits = 0, big.mark = ","), sep=""),
+              align="left")
+    
+  }
+  
+  else{
+    
+    hchart(speed()$average_speed) %>% 
+      hc_add_theme(hc_theme_flatdark()) %>%
+      hc_yAxis(title=" ") %>%
+      hc_xAxis(title=" ") %>%
+      hc_chart(zoomType = "xy") %>%
+      hc_subtitle(text=paste("Avg. Cross Pro: ",format(mean(speed()$average_speed[speed()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+                         "Avg. Commute: ",format(mean(speed()$average_speed[speed()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+                         "Avg. Road: ",format(mean(speed()$average_speed[speed()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+                         "Avg. Zwift: ",format(mean(speed()$average_speed[speed()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              align="left")
+  }
+)
+
+
+```
+
+
+### Duration
+```{r duration, echo=F}
+
+time <- reactive({
+  
+  if(input$chart_select == "All Rides"){
+    
+    rides %>%
+      #dplyr::filter(bike != "Cross Pro") %>%
+      dplyr::select(bike, type2, date2, month, moving_time_mins) %>%
+      dplyr::group_by(bike,type2,date2)  %>%
+      dplyr::summarise(total_time = sum(moving_time_mins/60)) %>%
+      dplyr::mutate(month = lubridate::month(date2, label = T, abbr = T),
+                    ride_type = paste(bike, type2, sep = "-"))
+  }
+    
+    else if(input$chart_select == "Distribution"){
+      
+    rides %>%
+      dplyr::filter(type2 %in% input$bike_select) %>%
+      #dplyr::filter(type2 == "Road Ride") %>%
+      #dplyr::filter(bike != "Cross Pro") %>%
+      dplyr::select(bike, moving_time_mins) 
+    }
+  
+  else {
+    
+    rides %>%
+      #dplyr::filter(bike != "Cross Pro")%>%
+      dplyr::group_by(bike, type2, date2) %>%
+      dplyr::summarise(total_time = sum(moving_time_mins/60)) %>%
+      dplyr::mutate(cs = cumsum(total_time), 
+             ride_type = paste(bike, type2, sep = "-"))
+    
+  }
+  
+  
+})
+  
+
+renderHighchart(
+  
+  if(input$chart_select == "All Rides"){
+    
+  hchart(time(), type =  "scatter", hcaes(x=date2, y = round(total_time,2), group = ride_type, size = total_time)) %>%
+  #hc_add_theme(hc_theme_elementary())%>%
+  hc_add_theme(hc_theme_flatdark()) %>%
+  hc_yAxis(title=" ") %>%
+  hc_xAxis(title=" ") %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_subtitle(text=paste("Cross Pro: ",format(sum(time()$total_time[time()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+                         "Commute: ",format(sum(time()$total_time[time()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+                         "Road: ",format(sum(time()$total_time[time()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+                         "Zwift: ",format(sum(time()$total_time[time()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              align="left") %>%
+  hc_tooltip(useHTML = TRUE,
+             headerFormat = "<table>",
+             pointFormat = paste("<tr><th colspan=\"1\"><b>{point.label}</b></th></tr>",
+                                 "<tr><th>Duration (hrs): </th><td>{point.y}</td></tr>"),
+             footerFormat = "</table>")%>% 
+    hc_yAxis(min = 0)
+    
+  }
+ 
+  else if(input$chart_select == "Distribution"){
+    
+    hchart(time()$moving_time_mins/60) %>% 
+      hc_add_theme(hc_theme_flatdark()) %>%
+      hc_yAxis(title=" ") %>%
+      hc_xAxis(title=" ") %>%
+      hc_chart(zoomType = "xy") %>%
+      hc_subtitle(text=paste("Avg. Cross Pro: ",format(mean((time()$moving_time_mins/60)[time()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+                         "Avg. Commute: ",format(mean((time()$moving_time_mins/60)[time()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+                         "Avg. Road: ",format(mean((time()$moving_time_mins/60)[time()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+                         "Avg. Zwift: ",format(mean((time()$moving_time_mins/60)[time()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              align="left")
+    
+  }
+  
+  else{
+    
+    hchart(time(), type =  "line", hcaes(x=date2, y = round(cs,2), group = ride_type)) %>% 
+      hc_add_theme(hc_theme_flatdark()) %>%
+      hc_yAxis(title=" ") %>%
+      hc_xAxis(title=" ") %>%
+      hc_chart(zoomType = "xy") %>%
+      hc_subtitle(text=paste("Cross Pro: ",format(max(time()$cs[time()$ride_type == "Cross Pro-Road Ride"]),digits = 0, big.mark = ","), " | ", 
+                         "Commute: ",format(max(time()$cs[time()$ride_type == "Commuter-Commute"]),digits = 0, big.mark = ","), " | ", 
+                         "Road: ",format(max(time()$cs[time()$ride_type == "Emonda-Road Ride"]),digits = 0, big.mark = ","), " | ",
+                         "Zwift: ",format(max(time()$cs[time()$ride_type == "Emonda-Zwift"]),digits = 0, big.mark = ","), sep=""),
+              align="left") 
+  }
+)
+
+```
