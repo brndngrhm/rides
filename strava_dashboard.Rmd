@@ -22,14 +22,14 @@ output:
 runtime: shiny
 ---
 
-```{r packages, include=FALSE}
-#setup instructions ----
+```{r packages, include = FALSE}
 
+#setup instructions ----
 #create personal API - https://www.strava.com/settings/api
-#1 create an application - http://labs.strava.com/developers/ >> then got o get started
-   #* create a new blank .rmd file, save and publish it, use this as the url for creating the app
-   #* for "Authorization callback domain" type 'localhost'
-    #* create app to get the client ID and client secret
+#1 create an application - http://labs.strava.com/developers/ >> then go to get started
+   #create a new blank .rmd file, save and publish it, use this as the url for creating the app
+   #for "Authorization callback domain" type 'localhost'
+    #create app to get the client ID and client secret
 
 #2. Lives at https://www.strava.com/settings/api
 
@@ -41,36 +41,19 @@ runtime: shiny
 # - Every API retrieval function in the rStrava package requires an authentication token (called stoken in the help documents).
 
 #load packages ---- 
-#devtools::install_github('fawda123/rStrava')
 library(rStrava) #https://github.com/fawda123/rStrava
 library(dplyr)
-# library(reshape2)
 library(padr)
-# library(plyr)
 library(lubridate)
 library(flexdashboard)
-library(httr)
-library(zoo)
 library(highcharter)
-library(xts)
-library(scales)
-library(ggthemes)
-#library(plotly)
-library(ggmap)
-library(miniUI)
-#library(DT)
 library(shiny)
-#library(Hmisc)
 library(httr)
-#library(skimr)
-# library(padr)
-# library(ggrepel)
-library(viridis)
 ```
 
 ```{r load_secrets}
 
-#load Strava API tokenand configure strava_oauth
+#load Strava API token and configure strava_oauth
 source("secrets.R")
 
 ```
@@ -78,7 +61,7 @@ source("secrets.R")
 
 ```{r get_strava_data}
 
-#load data fom strava ad convert to dataframe
+#load data from strava ad convert to dataframe
 rides_raw <- get_activity_list(stoken, id = id, club = FALSE, friends = FALSE)
 rides <- as.data.frame(compile_activities(rides_raw,  units = "imperial"))
 
@@ -115,15 +98,9 @@ rides <- rides %>%
            TRUE ~ "Other"
          )
   )
-
-#store max week
-max_week <- rides %>%
-  filter(date == max(date)) %>%
-  pull(week_of)
-
 ```
 
-```{r summaries, include=F}
+```{r summaries, include=F, eval = T}
 
 #create weekly/monthly summaries
 ride_summary <- function(data, ...){
@@ -138,22 +115,9 @@ ride_summary <- function(data, ...){
 }
 
 week <- ride_summary(rides, week, ride_type)
-
-current_week <- ride_summary(rides, week) %>%
-  ungroup() %>%
-  filter(week == max(week))
-
-month <- ride_summary(rides, month)
-
-current_month <- ride_summary(rides, month) %>%
-  ungroup() %>%
-  filter(month == max(month))
-
-month_bike <- ride_summary(rides,  month, bike, ride_type)
-
 ```
 
-Dashboard
+Rides Dashboard
 ======================================================================
 
 Sidebar {.sidebar}
@@ -253,7 +217,7 @@ Row
 
 ### Weekly View
 ```{r}
-bike_summary <- reactive({
+metric_summary <- reactive({
   
    rides %>% 
     filter(week == input$week_select) %>%
@@ -274,7 +238,7 @@ bike_summary <- reactive({
 
 renderHighchart({
   
-  hchart(bike_summary(), name = input$metric_select, type = "column", hcaes(x = day_nm, y = round(value, 2)), color = "#F92672") %>%
+  hchart(metric_summary(), name = input$metric_select, type = "column", hcaes(x = day_nm, y = round(value, 2)), color = "#F92672") %>%
     hc_title(text = paste("Daily", input$metric_select, sep = " "), align = "left") %>%
     hc_subtitle(text = paste("For week of", input$week_select), sep = " ", align = "left") %>%
     hc_xAxis(title = list(text = " ")) %>%
@@ -323,7 +287,7 @@ renderHighchart(
   
 hchart(monthly_comparison(), type = "line", hcaes(x = as.factor(id), y = round(csum,2), group = month_label), color = c("#F92672", "#272822")) %>%
     hc_title(text = paste("Monthly Comparison of", input$metric_select), sep = " ", align = "left") %>%
-    hc_xAxis(title = list(text = "Days into the Month")) %>%
+    hc_xAxis(title = list(text = "Day of the Month")) %>%
     hc_yAxis(title = list(text = paste("Cumulative", input$metric_select, sep = " "))) %>%
     hc_add_theme(hc_theme_smpl())
 
@@ -335,7 +299,8 @@ Row
 ----------------
 ### heatmap
 ```{r heatmap, echo = F}
-month_summary <- reactive({
+
+heatmap <- reactive({
   
   rides %>%
     mutate(year = factor(lubridate::year(date)),
@@ -354,7 +319,7 @@ month_summary <- reactive({
 
 renderHighchart(
   
-  hchart(month_summary(), type = "heatmap", hcaes(x = month_nm, y = year, value = round(heatmap_value, 2))) %>%
+  hchart(heatmap(), type = "heatmap", hcaes(x = month_nm, y = year, value = round(heatmap_value, 2))) %>%
     hc_legend(layout = "vertical", verticalAlign = "middle", align = "right") %>%
     hc_add_theme(hc_theme_smpl()) %>%
     hc_yAxis(title=" ") %>%
@@ -409,16 +374,14 @@ renderHighchart({
     reshape2::melt(id.vars = c("month", "ride_type", "date")) %>%
     filter(variable == input$metric_select)
   
-hcboxplot(x = round(boxplots$value, 2), var = as.factor(boxplots$month), var2 = boxplots$ride_type,
-          outliers = TRUE) %>% 
-  hc_colors(c("#272822", "#F92672", "#66D9EF")) %>%
-  hc_chart(type = "column") %>%
-    hc_title(text = paste("Monthly", input$metric_select, "Distribution"), sep = " ", align = "left") %>%
+  hcboxplot(x = round(boxplots$value, 2), var = as.factor(boxplots$month), var2 = boxplots$ride_type,
+            outliers = TRUE) %>% 
+    hc_colors(c("#272822", "#F92672", "#66D9EF")) %>%
+    hc_chart(type = "column") %>%
+    hc_title(text = paste("Monthly", input$metric_select, "Distribution For the Past 12 Months"), sep = " ", align = "left") %>%
     hc_xAxis(title = list(text = input$metric_select)) %>%
     hc_yAxis(title = list(text = " ")) %>%
     hc_add_theme(hc_theme_smpl())
   
 })
-
-
 ```
