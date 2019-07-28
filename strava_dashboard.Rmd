@@ -4,21 +4,7 @@ output:
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
-    #source_code: embed
     theme: bootstrap
-    #theme: cerulean
-    #theme: journal
-    #theme: flatly #good one
-    #theme: readable
-    #theme: spacelab
-    #theme: united
-    #theme: cosmo #default
-    #theme: lumen
-    #theme: darkly
-    #theme: paper #good one
-    #theme: sandstone
-    #theme: simplex
-    #theme: yeti #good one
 runtime: shiny
 ---
 
@@ -128,7 +114,7 @@ Sidebar {.sidebar}
 #Define sidebar user inputs
 radioButtons(inputId =  "metric_select",label = h4("View Data for"),
              choices = c("Count", "Distance", "Hours", "Elevation"),
-             selected = "Count")
+             selected = "Distance")
 
 selectInput(
         inputId = "week_select",
@@ -379,8 +365,8 @@ renderHighchart({
     hc_colors(c("#272822", "#F92672", "#66D9EF")) %>%
     hc_chart(type = "column") %>%
     hc_title(text = paste("Monthly", input$metric_select, "Distribution For the Past 12 Months"), sep = " ", align = "left") %>%
-    hc_xAxis(title = list(text = input$metric_select)) %>%
-    hc_yAxis(title = list(text = " ")) %>%
+    hc_xAxis(title = list(text = " ")) %>%
+    hc_yAxis(title = list(text = input$metric_select)) %>%
     hc_add_theme(hc_theme_smpl())
   
 })
