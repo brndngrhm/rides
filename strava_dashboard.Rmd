@@ -1,10 +1,13 @@
 ---
-title: "Strava Data"
+title: "Ride Tracker"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
     theme: bootstrap
+    source_code: embed
+    navbar:
+      - { icon: "fa-github", href: "https://github.com/brndngrhm/rides", align: right}
 runtime: shiny
 ---
 
@@ -37,6 +40,19 @@ library(shiny)
 library(httr)
 ```
 
+<!-- css to suppress flexdsahboard row titles -->
+<style>
+.chart-title {
+height: 0px;
+color: white;
+padding-top: 0px;
+padding-right: 0px;
+padding-bottom: 0px;
+padding-left: 0px;
+}
+</style>
+
+
 ```{r load_secrets}
 
 #load Strava API token and configure strava_oauth
@@ -57,6 +73,9 @@ rides <- as.data.frame(compile_activities(rides_raw,  units = "imperial"))
 
 #set week start to Monday instead of Sunday to match Strava formatting
 options(lubridate.week.start = 1) 
+
+#turn of scientific notation
+options(scipen=999)
 
 #format rides data
 rides <- rides %>%
@@ -122,7 +141,62 @@ selectInput(
         choices = rides$week,
         selected = "test",
         multiple = F)
+
+hr()
+hr()
+
+#values for sidebar below
+recent_weeks <- ride_summary(rides, week) %>%
+  ungroup() %>%
+  filter(week > max(week) - weeks(4)) %>%
+  summarise(avg_ride = round(mean(count), 2),
+           avg_dist = round(mean(tot_dist), 2),
+           avg_time = round(mean(tot_time), 2)
+  )
+
+current_year_totals <- ride_summary(rides, week) %>%
+  ungroup() %>%
+  mutate(year = lubridate::year(week)) %>%
+  filter(year >= max(year)) %>%
+  summarise(tot_ride = round(sum(count), 2),
+            tot_dist = format(round(sum(tot_dist), 2), digits = 2, big.mark = ","),
+            tot_time = round(sum(tot_time), 2),
+            tot_elev = format(round(sum(tot_elev), 2), digits = 2, big.mark = ","),
+  )
+
+all_time_totals <- ride_summary(rides, week) %>%
+  ungroup() %>%
+  summarise(tot_ride = format(round(sum(count), 2), digits = 2, big.mark = ","),
+            tot_dist = format(round(sum(tot_dist), 2), digits = 2, big.mark = ","),
+            tot_time = format(round(sum(tot_time), 2), digits = 2, big.mark = ","),
+            tot_elev = format(round(sum(tot_elev), 2), digits = 2, big.mark = ","),
+  )
+
 ```
+
+#### Last 4 Weeks
+
+Avg Rides / Week: **`r recent_weeks[1,1]`**  
+Avg Distance / Week: **`r recent_weeks[1,2]`**  
+Avg Time / Week: **`r recent_weeks[1,3]`**  
+
+#### `r max(rides$year)`  
+Rides: **`r current_year_totals[1,1]`**  
+Distance: **`r current_year_totals[1,2]`**  
+Time: **`r current_year_totals[1,3]`**  
+Elevation: **`r current_year_totals[1,4]`**  
+
+#### All Time  
+Rides: **`r all_time_totals[1,1]`**    
+Distance: **`r all_time_totals[1,2]`**    
+Time: **`r all_time_totals[1,3]`**    
+Elevation: **`r all_time_totals[1,4]`**    
+
+`r hr()`
+`r hr()`
+
+*Data from Strava via [rStrava](https://github.com/fawda123/rStrava)*  
+*Charts done using [highcharter](http://jkunst.com/highcharter/)*  
 
 
 Row
@@ -235,7 +309,7 @@ renderHighchart({
 ```
 
 ### Comparison
-```{r, echo=F}
+```{r}
 
 monthly_comparison <- reactive({
   
@@ -283,8 +357,8 @@ hchart(monthly_comparison(), type = "line", hcaes(x = as.factor(id), y = round(c
 
 Row
 ----------------
-### heatmap
-```{r heatmap, echo = F}
+### Heatmap
+```{r}
 
 heatmap <- reactive({
   
@@ -308,6 +382,7 @@ renderHighchart(
   hchart(heatmap(), type = "heatmap", hcaes(x = month_nm, y = year, value = round(heatmap_value, 2))) %>%
     hc_legend(layout = "vertical", verticalAlign = "middle", align = "right") %>%
     hc_add_theme(hc_theme_smpl()) %>%
+    hc_title(text = paste("Monthly Total", input$metric_select), sep = " ", align = "left") %>%
     hc_yAxis(title=" ") %>%
     hc_xAxis(title=" ") %>%
     hc_colorAxis(stops = color_stops(10, c("white", "#F92672"))) %>%
@@ -318,7 +393,7 @@ renderHighchart(
 ```
 
 ### Historical 
-```{r timeseries}
+```{r}
 
 renderHighchart({
   
@@ -345,7 +420,7 @@ renderHighchart({
 Row
 -------------------------------------
 
-### test
+### Boxplots
 ```{r}
 
 renderHighchart({

@@ -1,0 +1,12 @@
+name: RideTracker
+title: RideTracker
+username:
+account: brndngrhm
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1055219
+bundleId: 2271810
+url: https://brndngrhm.shinyapps.io/RideTracker/
+when: 1564340641.18012
+asMultiple: FALSE
+asStatic: FALSE
