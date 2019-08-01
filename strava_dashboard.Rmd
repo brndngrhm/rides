@@ -60,12 +60,13 @@ source("secrets.R")
 
 ```
 
-
 ```{r get_strava_data}
 
 #load data from strava ad convert to dataframe
-rides_raw <- get_activity_list(stoken, id = id, club = FALSE, friends = FALSE)
-rides <- as.data.frame(compile_activities(rides_raw,  units = "imperial"))
+rides_list<- get_activity_list(stoken, id = id, club = FALSE, friends = FALSE)
+rides_raw <- as.data.frame(compile_activities(rides_list,  units = "imperial"))
+
+athl_fun(2837007)
 
 ```
 
@@ -78,7 +79,7 @@ options(lubridate.week.start = 1)
 options(scipen=999)
 
 #format rides data
-rides <- rides %>%
+rides <- rides_raw %>%
   filter(type != "Run") %>%
   mutate(date = as.Date(lubridate::ymd_hms(start_date_local)),
          year = year(date),
@@ -97,12 +98,18 @@ rides <- rides %>%
            gear_id == "b2980189" ~ "Commuter",
            TRUE ~ "Other"),
          ride_type = case_when(
-           bike == "Commuter" & type == "Ride" ~ "Commute",
-           bike %in% c("Fuji Cross Pro", "Trek Emonda", "Giant TCX") & type == "Ride" ~ "Road Ride",
-           bike %in% c("Fuji Cross Pro", "Trek Emonda", "Giant TCX") & type == "VirtualRide" ~ "Zwift",
+           type == "Ride" & distance <= 15 ~ "Commute/Other",
+           type == "Ride" & distance >= 0 ~ "Road Ride",
+           type == "VirtualRide" & distance >= 0  ~ "Zwift",
            TRUE ~ "Other"
          )
-  )
+  ) %>%
+  ungroup() %>%
+  group_by(date) %>%
+  mutate(ride_num = dplyr::row_number(),
+         max_rides = max(ride_num),
+         activity_type = ifelse(type != "VirtualRide" & distance <= 15 , "Commute/Other", "Training")) %>%
+  ungroup()
 ```
 
 ```{r summaries, include=F, eval = T}
@@ -119,7 +126,7 @@ ride_summary <- function(data, ...){
                      tot_cals = sum(kilojoules, na.rm = T))
 }
 
-week <- ride_summary(rides, week, ride_type)
+week <- ride_summary(rides, week)
 ```
 
 Rides Dashboard
@@ -141,6 +148,22 @@ selectInput(
         choices = rides$week,
         selected = "test",
         multiple = F)
+
+all_types <- c("Commute/Other", "Training")
+
+selectizeInput("type_select",
+               h4("Filter Ride Types"),
+               choices = c("All"  = "", all_types),
+               selected = "All")
+
+actionButton(inputId = "clear_type",
+             label = "View All Types")
+
+observeEvent(input$clear_type, {
+                updateSelectInput(session = session, inputId = "type_select", selected = '')
+})
+
+type_filter <- reactive(if(input$type_select == "") all_types else input$type_select)
 
 hr()
 hr()
@@ -280,7 +303,8 @@ Row
 metric_summary <- reactive({
   
    rides %>% 
-    filter(week == input$week_select) %>%
+    filter(week == input$week_select,
+           activity_type %in% type_filter()) %>%
     group_by(date) %>%
         dplyr::summarise(Count = n(),
                      Distance = sum(distance),
@@ -321,6 +345,7 @@ monthly_comparison <- reactive({
   max_date <- max(df$date)
   
   df %>%
+    filter(activity_type %in% type_filter()) %>%
     group_by(date) %>%
     dplyr::summarise(Count = n(),
                      Distance = sum(distance),
@@ -363,6 +388,7 @@ Row
 heatmap <- reactive({
   
   rides %>%
+    filter(activity_type %in% type_filter()) %>%
     mutate(year = factor(lubridate::year(date)),
            month_nm = lubridate::month(date, label = T, abbr = T)) %>%
     group_by(year, month_nm) %>%
@@ -426,7 +452,8 @@ Row
 renderHighchart({
   
   boxplots <- rides %>%
-    filter(month >= max(month) %m-% months(12)) %>%
+    filter(month >= max(month) %m-% months(12),
+           activity_type %in% type_filter()) %>%
     group_by(month, date, ride_type) %>%
     summarise(Count = n(),
               Distance = sum(distance),
