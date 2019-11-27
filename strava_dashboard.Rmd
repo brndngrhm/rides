@@ -63,10 +63,8 @@ source("secrets.R")
 ```{r get_strava_data}
 
 #load data from strava ad convert to dataframe
-rides_list<- get_activity_list(stoken, id = id, club = FALSE, friends = FALSE)
+rides_list <- get_activity_list(stoken)
 rides_raw <- as.data.frame(compile_activities(rides_list,  units = "imperial"))
-
-athl_fun(2837007)
 
 ```
 
@@ -80,7 +78,7 @@ options(scipen=999)
 
 #format rides data
 rides <- rides_raw %>%
-  filter(type != "Run") %>%
+  filter(!(type %in% c("Run", "Hike"))) %>%
   mutate(date = as.Date(lubridate::ymd_hms(start_date_local)),
          year = year(date),
          month = lubridate::floor_date(date, "month"),
@@ -129,8 +127,6 @@ ride_summary <- function(data, ...){
 week <- ride_summary(rides, week)
 ```
 
-Rides Dashboard
-======================================================================
 
 Sidebar {.sidebar}
 ----------------------------
